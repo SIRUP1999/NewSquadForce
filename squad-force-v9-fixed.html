@@ -2649,6 +2649,271 @@ class SquadMember extends Entity {
 }
 
 // ============================================================
+// FILE: js/game/boss.js
+// ============================================================
+
+class Boss extends Entity {
+  constructor(x, y, stage, round) {
+    super(x, y, 40);
+    this.stage = stage;
+    this.round = round;
+    this.color = '#FF00FF';
+    this.speed = 2;
+    this.maxHealth = 500 * (1 + (stage - 1) * 0.5) * (1 + (round - 1) * 0.3);
+    this.health = this.maxHealth;
+    this.damage = 30 * (1 + (stage - 1) * 0.3);
+    this.scoreValue = 5000 * stage;
+    this.xpValue = 100 * stage;
+    this.attackRange = 400;
+    this.attackCooldown = 0;
+    this.attackRate = 800;
+    this.detectionRange = 800;
+    this.currentPhase = 1;
+    this.maxPhases = 3;
+    this.phaseThresholds = [0.7, 0.4, 0.1];
+    this.state = 'idle';
+    this.target = null;
+    this.spawnTimer = 0;
+    this.spawnInterval = 5000;
+    this.specialAttackTimer = 0;
+    this.specialAttackInterval = 10000;
+  }
+
+  update(dt, gameState) {
+    if (!this.active) return;
+    this.target = gameState.player;
+
+    const healthPercent = this.health / this.maxHealth;
+    
+    // Phase transitions
+    if (this.currentPhase < this.maxPhases && healthPercent <= this.phaseThresholds[this.currentPhase - 1]) {
+      this.currentPhase++;
+      eventBus.emit(EVENTS.BOSS_PHASE_CHANGE, this.currentPhase);
+      eventBus.emit(EVENTS.NOTIFICATION, `BOSS PHASE ${this.currentPhase}!`);
+      this.onPhaseChange();
+    }
+
+    if (!this.target || !this.target.active) {
+      this.wander(dt);
+      super.update(dt, gameState);
+      return;
+    }
+
+    const distToPlayer = this.distanceTo(this.target);
+
+    switch (this.state) {
+      case 'idle':
+        if (distToPlayer < this.detectionRange) {
+          this.state = 'chase';
+        } else {
+          this.wander(dt);
+        }
+        break;
+
+      case 'chase':
+        if (distToPlayer > this.detectionRange * 1.5) {
+          this.state = 'idle';
+        } else if (distToPlayer < this.attackRange) {
+          this.state = 'attack';
+        } else {
+          this.moveTo(this.target.x, this.target.y, this.speed);
+        }
+        break;
+
+      case 'attack':
+        if (distToPlayer > this.attackRange * 1.2) {
+          this.state = 'chase';
+        } else {
+          this.angle = this.angleTo(this.target);
+          this.attackCooldown -= dt * 1000;
+          if (this.attackCooldown <= 0) {
+            this.attack(gameState);
+            this.attackCooldown = this.attackRate;
+          }
+          
+          // Strafe
+          const strafeDir = Math.sin(performance.now() / 600) > 0 ? 1 : -1;
+          this.vx += Math.cos(this.angle + Math.PI / 2) * strafeDir * this.speed * 0.3;
+          this.vy += Math.sin(this.angle + Math.PI / 2) * strafeDir * this.speed * 0.3;
+        }
+        break;
+    }
+
+    // Spawn adds
+    this.spawnTimer += dt * 1000;
+    if (this.spawnTimer >= this.spawnInterval) {
+      this.spawnTimer = 0;
+      this.spawnAdds(gameState);
+    }
+
+    // Special attack
+    this.specialAttackTimer += dt * 1000;
+    if (this.specialAttackTimer >= this.specialAttackInterval) {
+      this.specialAttackTimer = 0;
+      this.specialAttack(gameState);
+    }
+
+    super.update(dt, gameState);
+  }
+
+  onPhaseChange() {
+    this.speed *= 1.2;
+    this.attackRate *= 0.8;
+    this.spawnInterval *= 0.8;
+    
+    // Heal a bit on phase change
+    this.health = Math.min(this.health + this.maxHealth * 0.1, this.maxHealth);
+  }
+
+  attack(gameState) {
+    // Shoot at player
+    eventBus.emit(EVENTS.PLAYER_SHOOT, {
+      x: this.x + Math.cos(this.angle) * this.radius,
+      y: this.y + Math.sin(this.angle) * this.radius,
+      angle: this.angle + (Math.random() - 0.5) * 0.2,
+      speed: 800,
+      damage: this.damage,
+      range: this.attackRange,
+      color: '#FF00FF',
+      owner: this
+    });
+
+    // Phase 2+: Shoot in multiple directions
+    if (this.currentPhase >= 2) {
+      for (let i = 1; i < 4; i++) {
+        const spreadAngle = this.angle + (i * Math.PI / 2);
+        eventBus.emit(EVENTS.PLAYER_SHOOT, {
+          x: this.x + Math.cos(spreadAngle) * this.radius,
+          y: this.y + Math.sin(spreadAngle) * this.radius,
+          angle: spreadAngle,
+          speed: 600,
+          damage: this.damage * 0.5,
+          range: this.attackRange * 0.8,
+          color: '#FF00FF',
+          owner: this
+        });
+      }
+    }
+
+    // Phase 3: Ring attack
+    if (this.currentPhase >= 3) {
+      for (let i = 0; i < 8; i++) {
+        const ringAngle = (Math.PI * 2 / 8) * i;
+        eventBus.emit(EVENTS.PLAYER_SHOOT, {
+          x: this.x,
+          y: this.y,
+          angle: ringAngle,
+          speed: 500,
+          damage: this.damage * 0.3,
+          range: this.attackRange,
+          color: '#FF00FF',
+          owner: this
+        });
+      }
+    }
+  }
+
+  specialAttack(gameState) {
+    // Dash toward player
+    if (this.target && this.target.active) {
+      const dashAngle = this.angleTo(this.target);
+      this.vx += Math.cos(dashAngle) * this.speed * 5;
+      this.vy += Math.sin(dashAngle) * this.speed * 5;
+    }
+  }
+
+  spawnAdds(gameState) {
+    const types = ['GRUNT', 'RUSHER'];
+    if (this.currentPhase >= 2) types.push('HEAVY');
+    if (this.currentPhase >= 3) types.push('TANK');
+    
+    const type = types[Math.floor(Math.random() * types.length)];
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 150 + Math.random() * 100;
+    
+    eventBus.emit(EVENTS.ENEMY_SPAWN, {
+      type,
+      x: this.x + Math.cos(angle) * dist,
+      y: this.y + Math.sin(angle) * dist,
+      wave: this.game ? this.game.state.wave : 1
+    });
+  }
+
+  wander(dt) {
+    this.wanderAngle = (this.wanderAngle || 0) + (Math.random() - 0.5) * 0.5;
+    this.vx += Math.cos(this.wanderAngle) * this.speed * 0.5;
+    this.vy += Math.sin(this.wanderAngle) * this.speed * 0.5;
+  }
+
+  takeDamage(amount, source = null) {
+    super.takeDamage(amount, source);
+    if (this.state === 'idle') {
+      this.state = 'chase';
+    }
+    if (this.health <= 0) {
+      eventBus.emit(EVENTS.BOSS_DEATH, this);
+    }
+  }
+
+  die(source = null) {
+    super.die(source);
+    audioManager.playExplosion();
+  }
+
+  render(ctx, camera) {
+    if (!this.active) return;
+    const screenPos = camera.worldToScreen(this.x, this.y);
+    
+    ctx.save();
+    ctx.translate(screenPos.x, screenPos.y);
+    ctx.rotate(this.angle);
+
+    // Boss body - larger and more menacing
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Phase indicator rings
+    for (let i = 1; i <= this.currentPhase; i++) {
+      ctx.strokeStyle = `rgba(255, 0, 255, ${0.3 + i * 0.2})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.radius + i * 8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Glowing core
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(0, 0, this.radius * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Health bar (larger for boss)
+    ctx.restore();
+    
+    const barWidth = 60;
+    const barHeight = 6;
+    const barY = screenPos.y - this.radius - 15;
+    const healthRatio = this.health / this.maxHealth;
+    
+    ctx.fillStyle = '#333333';
+    ctx.fillRect(screenPos.x - barWidth / 2, barY, barWidth, barHeight);
+    ctx.fillStyle = healthRatio > 0.5 ? '#FF00FF' : healthRatio > 0.25 ? '#FF00AA' : '#FF0000';
+    ctx.fillRect(screenPos.x - barWidth / 2, barY, barWidth * healthRatio, barHeight);
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(screenPos.x - barWidth / 2, barY, barWidth, barHeight);
+
+    // Boss name and phase
+    ctx.fillStyle = '#FF00FF';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`BOSS - Phase ${this.currentPhase}`, screenPos.x, screenPos.y - this.radius - 22);
+  }
+}
+
+// ============================================================
 // FILE: js/game/base.js
 // ============================================================
 
