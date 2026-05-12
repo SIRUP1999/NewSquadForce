@@ -1217,7 +1217,11 @@ class Renderer {
     this.ctx.restore();
   }
 
-  drawUI(gameState) {}
+  setHUD(hud) { this.hud = hud; }
+
+  drawUI(gameState) {
+    if (this.hud) this.hud.render(this.ctx);
+  }
 
   drawDebug(gameState) {
     this.ctx.fillStyle = '#00FF00';
@@ -4267,7 +4271,7 @@ class SquadForceV9 {
     this.leaderboard = new LeaderboardManager();
 
     this.saveManager.setGame(this.game);
-    this.game.renderer.drawUI = (gameState) => this.hud.render(this.game.ctx);
+    this.game.renderer.setHUD(this.hud);
 
     this.setupEventListeners();
     this.resize();
