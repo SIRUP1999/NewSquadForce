@@ -1373,7 +1373,7 @@ class Game {
 
   startWave(wave) {
     this.state.wave = wave;
-    const difficulty = CONSTANTS.DIFFICULTY[this.state.difficulty];
+    const difficulty = DIFFICULTY[this.state.difficulty];
     const baseCount = 5 + wave * 3;
     const enemyCount = Math.floor(baseCount * difficulty.enemyCount);
     eventBus.emit(EVENTS.NOTIFICATION, `Wave ${wave} - ${enemyCount} enemies incoming!`);
@@ -3121,6 +3121,12 @@ class HUD {
     eventBus.on(EVENTS.WAVE_START, (wave) => {
       this.wave = wave;
     });
+    eventBus.on(EVENTS.ENEMY_DEATH, () => { this.kills++; });
+    eventBus.on(EVENTS.BOSS_DEATH,  () => { this.kills++; });
+    eventBus.on(EVENTS.STAGE_COMPLETE, (stage) => { this.stage = stage; });
+    eventBus.on(EVENTS.ENEMY_DEATH, () => { this.kills++; });
+    eventBus.on(EVENTS.BOSS_DEATH,  () => { this.kills++; });
+    eventBus.on(EVENTS.STAGE_COMPLETE, (stage) => { this.stage = stage; });
     eventBus.on(EVENTS.NOTIFICATION, (text) => {
       this.notifications.push({
         text,
@@ -4261,7 +4267,7 @@ class SquadForceV9 {
     this.leaderboard = new LeaderboardManager();
 
     this.saveManager.setGame(this.game);
-    this.game.renderer.drawUI = (ctx, state) => this.hud.render(ctx);
+    this.game.renderer.drawUI = (gameState) => this.hud.render(this.game.ctx);
 
     this.setupEventListeners();
     this.resize();
